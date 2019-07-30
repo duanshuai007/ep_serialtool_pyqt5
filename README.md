@@ -24,3 +24,17 @@
 ### 生成exe文件
 > 在根目录执行`pyinstaller -F serialtool.py`,exe文件最后会生成在dist目录中。  
 > 需要事先安装pyinstaller模块，并将其路径添加到环境变量中。
+
+### 地锁协议
+> 因为这个小程序是把自身作为server来使用的(虽然代码中有考虑作为end point的情况,但并没有完善相关代码)  
+> 所以这里的协议是针对server所能接收和发送的来讲解。  
+> 控制命令(CMD)
+>> HEAD(1) LEN(1) ID(2) CMD(1) IDENTIFY(4) CRC(2) TAIL(1)  
+
+> 响应信息(RESP)  
+>> HEAD(1) LEN(1) ID(2) CMD(1) RESP(1) IDENTIFY(4) CRC(2) TAIL(1)  
+
+>> HEAD = 0XA5, TAIL = 0X5A   
+>> LEN 在发送时，该字段不参与校验，所以该值只有在需要设置设备参数(CMD = 9,11,16)时才有意义。  
+>> 在接收时，该值都等于长度13.  
+>> ID 占两个字节，低位在前，高位在后。IDENTIFY占4个字节，低位在前，高位在后。CRC占2个字节，低位在前。

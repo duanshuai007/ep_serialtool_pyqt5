@@ -10,6 +10,7 @@ import json
 import operator
 import random
 import copy
+import re
 
 from PyQt5 import QtWidgets, QtCore
 from PyQt5.QtWidgets import QFileDialog, QWidget, QMessageBox, QHeaderView, QTableWidgetItem, QAbstractItemView
@@ -29,7 +30,7 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
     SerialPortList = ''
     loraSerial = None
     rQueue = ''
-    hexSelect = False
+    hexSelect = True
     SerialRecvCount = 0
     SerialSendCount = 0
     devList = []
@@ -142,6 +143,11 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
     
     test_count = 0
     
+    curSendID = ''
+    curSendCMD = ''
+    curSendPara = ''
+    curSendIdentify = ''
+    
     def __init__(self):
         super(Window, self).__init__()
         self.setupUi(self)
@@ -203,10 +209,58 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
         self.lcd_time.setSegmentStyle(QtWidgets.QLCDNumber.Flat)
         self.lcd_time.setMode(QtWidgets.QLCDNumber.Dec)
 
+        self.lineEdit_dev_id.setMaxLength(6)
+        self.lineEdit_dev_id.textEdited[str].connect(lambda:self.onChange(1))
+        self.lineEdit_dev_par.setMaxLength(4)
+        self.lineEdit_dev_par.textEdited[str].connect(lambda:self.onChange(2))
+        self.lineEdit_dev_identify.setMaxLength(10)
+        self.lineEdit_dev_identify.textEdited[str].connect(lambda:self.onChange(3))
+        self.comboBox_dev_cmd.currentIndexChanged.connect(self.sendCMDSelectedFunction)
+        self.curSendCMD = '1'
+        self.comboBox_dev_cmd.setCurrentIndex(0)
+        
         self.timer = QBasicTimer()
         self.timer.start(10, self)
         self.recv_queue = queue.Queue(10)
         pass
+    
+    def do_regular_expression(self, msg):
+        if not msg:
+            return True
+        rule = r'^[0-9]+?$'
+        rule_c = re.compile(rule)
+        ret = re.findall(rule_c, msg)
+        if not ret:
+            #QMessageBox.warning(self,"Warning","配置串口为9600 8N1失败",QMessageBox.Ok)
+            rule = r'^0x[0-9a-fA-F]+?$'
+            rule_c = re.compile(rule)
+            ret = re.findall(rule_c, msg)
+            if not ret:
+                if msg != '0x':
+                    QMessageBox.warning(self,"Warning","请输入十进制/十六进制数字",QMessageBox.Ok)
+                    return False
+        return True
+
+    def onChange(self,type):
+        msg = ''
+        if type == 1:
+            msg = self.lineEdit_dev_id.text()
+            if self.do_regular_expression(msg) == False:
+                msg = msg[0:len(msg) - 1]
+                self.lineEdit_dev_id.setText(msg)
+            self.curSendID = msg
+        elif type == 2:
+            msg = self.lineEdit_dev_par.text()
+            if self.do_regular_expression(msg) == False:
+                msg = msg[0:len(msg) - 1]
+                self.lineEdit_dev_par.setText(msg)
+            self.curSendPara = msg
+        elif type == 3:
+            msg = self.lineEdit_dev_identify.text()
+            if self.do_regular_expression(msg) == False:
+                msg = msg[0:len(msg) - 1]
+                self.lineEdit_dev_identify.setText(msg)
+            self.curSendIdentify = msg
 
     def testhandler(self):
         #a5 0c 90 00 0b ff ff ff ff f3 5e 5a
@@ -241,13 +295,14 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
         self.loraSerial.clearCount()
         
     def serialdataShowFormat(self, num):
-        if num > 0:
-            self.hexSelect = False
-            self.checkBox_hexselect.setText("十进制显示")
-        else:
+        logging.info("select num=%d" % num)
+        if num == 0:
             self.hexSelect = True
             self.checkBox_hexselect.setText("十六进制显示")
-        
+        else:
+            self.hexSelect = False
+            self.checkBox_hexselect.setText("十进制显示")
+            
     def serialPortSelectedFunction(self, msg):
         if not msg:
             return
@@ -268,7 +323,10 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
         
     def serialStopbitsSelectedFunction(self, msg):
         self.newParDict["stopbits"] = msg
-  
+
+    def sendCMDSelectedFunction(self, index):
+        self.curSendCMD = str(index + 1)
+
     '''
     Open Serial Button Func
     '''
@@ -310,10 +368,11 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
         self.newParDict["stopbits"] = '1'
         if self.loraSerial.openSerial(self.newParDict) == False:
             logging.error("config lora serial 9600 8N1 failed")
+            QMessageBox.warning(self,"Warning","配置串口为9600 8N1失败",QMessageBox.Ok)
             return
         self.win_config.start(self.loraSerial)
         pass
-        
+
     def loraSendButtonFunction(self):
         data = {
             "id" : '',
@@ -321,35 +380,44 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
             "paramter" : '',
             "identify" : '',
         }
-        mId = self.lineEdit_dev_id.text()
-        mCmd = self.lineEdit_dev_cmd.text()
-        mPar = self.lineEdit_dev_par.text()
-        mIdentify = self.lineEdit_dev_identify.text()
-        if not mId or not mCmd: 
+        #mId = self.lineEdit_dev_id.text()
+        #mPar = self.lineEdit_dev_par.text()
+        #mIdentify = self.lineEdit_dev_identify.text()
+        if not self.curSendID or not self.curSendCMD: 
             QMessageBox.warning(self,"Warning","设备ID和CMD不能为空",QMessageBox.Ok)
             return
-        if mId.startswith("0x"):
-            data["id"] = str(int(mId, 16))
+
+        if self.curSendID.startswith("0x"):
+            data["id"] = str(int(self.curSendID, 16))
         else:
-            data["id"] = mId
-        if mCmd.startswith("0x"):
-            data["cmd"] = str(int(mCmd, 16))
-        else:
-            data["cmd"] = mCmd
-        if mPar:
-            if mPar.startswith("0x"):
-                data["paramter"] = str(int(mPar, 16))
+            data["id"] = self.curSendID
+
+        #if self.curSendCMD.startswith("0x"):
+        #    data["cmd"] = str(int(self.curSendCMD, 16))
+        #else:
+        data["cmd"] = self.curSendCMD
+
+        if self.curSendPara:
+            if self.curSendPara.startswith("0x"):
+                data["paramter"] = str(int(self.curSendPara, 16))
             else:
-                data["paramter"] = mPar
+                data["paramter"] = self.curSendPara
         else:
-            if data["cmd"] in ["9", "11", "16"]:
-                QMessageBox.warning(self,"Warning","CMD等于9/11/16时，参数不能为空",QMessageBox.Ok)
+            if data["cmd"] == '9':
+                QMessageBox.warning(self,"Warning","请设置安全距离，单位厘米",QMessageBox.Ok)
                 return
-        if mIdentify:
-            if mIdentify.startswith("0x"):
-                data["identify"] = str(int(mIdentify, 16))
+            elif data["cmd"] == '11':
+                QMessageBox.warning(self,"Warning","请设置检测周期，单位秒",QMessageBox.Ok)
+                return
+            elif data['cmd'] == 16:
+                QMessageBox.warning(self,"Warning","请设置心跳周期，单位秒",QMessageBox.Ok)
+                return
+
+        if self.curSendIdentify:
+            if self.curSendIdentify.startswith("0x"):
+                data["identify"] = str(int(self.curSendIdentify, 16))
             else:
-                data["identify"] = mIdentify
+                data["identify"] = self.curSendIdentify
         else:
             data["identify"] = str(4294967295)
         try:
@@ -376,7 +444,7 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
     def LoraDataDirectlyShow(self, bytelist):
         msg = ''
         for dat in bytelist:
-            if self.hexSelect == False:
+            if self.hexSelect == True:
                 msg = msg + "{:0>2x} ".format(dat)
             else:
                 msg = msg + "{:0>3d} ".format(dat)
@@ -513,7 +581,7 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
                     msgDict["value"] = self.motorStatusDict[l4bit]
                     msgDict['col'] = self.devStatusDict["dev_status"]["col"]
                 elif deviceCMD == 17:
-                    msgDict["value"] = "{:d}s".format(deviceRESP)
+                    msgDict["value"] = "{:d} min".format(deviceRESP)
                     msgDict['col'] = self.devStatusDict["heart"]["col"]
                 elif deviceCMD == 101:
                     msgDict["value"] = self.cmdDict[deviceCMD]
@@ -570,7 +638,7 @@ class Window(QtWidgets.QWidget, Ui_SerialTool):
                         tmpMsgDict["haveCar"]["value"] = self.haveCarStatusDict[h4bit]
                         tmpMsgDict["dev_status"]["value"] = self.motorStatusDict[l4bit]
                     elif deviceCMD == 17:
-                        tmpMsgDict["heart"]["value"] = "{:d}s".format(deviceRESP)
+                        tmpMsgDict["heart"]["value"] = "{:d} min".format(deviceRESP)
                     elif deviceCMD == 101:
                         tmpMsgDict["battery"]["value"] = "{:d}%".format(deviceRESP)
                 #logging.info("ready goto tableWidgetInsert")
